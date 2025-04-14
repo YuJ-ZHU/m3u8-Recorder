@@ -15,11 +15,11 @@
 ### 使用Docker部署
 
 ```bash
-docker pull yujzhu04/m3u8-recorder && docker run    m3u8-recorder -p 3838:3838 -v /path/to/downloads:/app/downloads m3u8-recorder
+docker pull yujzhu04/m3u8-recorder && docker run yujzhu04/m3u8-recorder -p 3838:3838 -v /path/to/downloads:/app/downloads m3u8-recorder
 ```
 将`/path/to/downloads`替换为你希望存储下载文件的路径。
 
-访问 http://localhost:3838 即可使用。
+随后访问 http://localhost:3838 即可使用。
 
 ### 构建Docker镜像
 
@@ -35,7 +35,7 @@ docker build -t m3u8-recorder .
 docker run m3u8-recorder -p 3838:3838 -v /path/to/downloads:/app/downloads m3u8-recorder
 ```
 
-访问 http://localhost:3838 即可使用。
+随后访问 http://localhost:3838 即可使用。
 
 
 ## 贡献与支持
