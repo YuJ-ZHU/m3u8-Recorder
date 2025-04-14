@@ -11,7 +11,8 @@ COPY app/static/ /app/app/static/
 RUN mkdir -p downloads
 
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+RUN apt-get install -y build-essential && \
+    pip install -r requirements.txt
 
 ENV DOWNLOADS_DIR="/app/downloads"
 
