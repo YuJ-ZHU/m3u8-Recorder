@@ -1,0 +1,11 @@
+# Docker build context ignore file
+.git/
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+LICENSE
+README.md
+*.pyc
+__pycache__/
+.DS_Store
