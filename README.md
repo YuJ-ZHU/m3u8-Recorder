@@ -32,7 +32,7 @@ docker build -t m3u8-recorder .
 然后，使用以下命令构建并运行容器：
 
 ```bash
-docker run m3u8-recorder -p 3838:3838 -v /path/to/downloads:/app/downloads m3u8-recorder
+docker run -p 3838:3838 -v /path/to/downloads:/app/downloads m3u8-recorder
 ```
 
 随后访问 http://localhost:3838 即可使用。
