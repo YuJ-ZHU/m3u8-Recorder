@@ -15,7 +15,7 @@
 ### 使用Docker部署
 
 ```bash
-docker pull yujzhu04/m3u8-recorder && docker run yujzhu04/m3u8-recorder -p 3838:3838 -v /path/to/downloads:/app/downloads m3u8-recorder
+docker pull yujzhu04/m3u8-recorder && docker run -p 3838:3838 -v /path/to/downloads:/app/downloads yujzhu04/m3u8-recorder
 ```
 将`/path/to/downloads`替换为你希望存储下载文件的路径。
 
