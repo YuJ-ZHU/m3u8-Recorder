@@ -17,6 +17,8 @@ from apscheduler.triggers.date import DateTrigger
 from pydantic import BaseModel
 import subprocess
 import time as time_module
+import re
+import threading
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,6 +51,9 @@ class Task(BaseModel):
     end_time: Optional[str] = None
     output_file: str
     type: str  # immediate, scheduled
+    progress: Optional[float] = 0.0
+    file_size: Optional[int] = 0
+    duration: Optional[str] = None
 
 scheduler = BackgroundScheduler()
 scheduler.start()
@@ -81,6 +86,7 @@ def download_m3u8(task_id: str):
     
     try:
         tasks[task_id]["status"] = "running"
+        tasks[task_id]["progress"] = 0.0
         save_tasks()
         
         url = task["url"]
@@ -92,27 +98,89 @@ def download_m3u8(task_id: str):
         cmd = [
             "ffmpeg", "-y", "-i", url, 
             "-c", "copy", "-bsf:a", "aac_adtstoasc", 
+            "-progress", "pipe:1",
             output_path
         ]
         
         process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+            universal_newlines=True, bufsize=1
         )
         
+        # 启动进度监控线程
+        progress_thread = threading.Thread(
+            target=monitor_progress, 
+            args=(process, task_id)
+        )
+        progress_thread.start()
+        
         stdout, stderr = process.communicate()
+        progress_thread.join()
         
         if process.returncode != 0:
-            logger.error(f"下载失败: {stderr.decode()}")
+            logger.error(f"下载失败: {stderr}")
             tasks[task_id]["status"] = "failed"
         else:
             logger.info(f"下载完成: {output_path}")
             tasks[task_id]["status"] = "completed"
+            tasks[task_id]["progress"] = 100.0
+            
+            # 获取文件大小
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                tasks[task_id]["file_size"] = file_size
             
         save_tasks()
     except Exception as e:
         logger.error(f"下载过程中出错: {e}")
         tasks[task_id]["status"] = "failed"
         save_tasks()
+
+def monitor_progress(process, task_id):
+    """监控ffmpeg进度"""
+    duration_pattern = re.compile(r'duration=([\d:.]+)')
+    time_pattern = re.compile(r'out_time=([\d:.]+)')
+    total_duration = None
+    
+    try:
+        for line in iter(process.stdout.readline, ''):
+            if not line:
+                break
+                
+            # 解析总时长
+            if total_duration is None:
+                duration_match = duration_pattern.search(line)
+                if duration_match:
+                    duration_str = duration_match.group(1)
+                    total_duration = parse_time_to_seconds(duration_str)
+                    tasks[task_id]["duration"] = duration_str
+            
+            # 解析当前进度
+            time_match = time_pattern.search(line)
+            if time_match and total_duration and total_duration > 0:
+                current_time_str = time_match.group(1)
+                current_time = parse_time_to_seconds(current_time_str)
+                progress = min((current_time / total_duration) * 100, 100)
+                tasks[task_id]["progress"] = round(progress, 1)
+                save_tasks()
+                
+    except Exception as e:
+        logger.error(f"监控进度时出错: {e}")
+
+def parse_time_to_seconds(time_str):
+    """将时间字符串转换为秒数"""
+    try:
+        parts = time_str.split(':')
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        elif len(parts) == 2:
+            minutes, seconds = parts
+            return int(minutes) * 60 + float(seconds)
+        else:
+            return float(time_str)
+    except:
+        return 0
 
 def schedule_task(task_id: str, start_time: str, end_time: Optional[str] = None):
     try:
@@ -245,6 +313,42 @@ async def delete_task(task_id: str):
     save_tasks()
     
     return JSONResponse(content={"message": "任务已删除"})
+
+@app.delete("/api/tasks/{task_id}/file")
+async def delete_task_file(task_id: str):
+    """删除任务对应的视频文件"""
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    task = tasks[task_id]
+    output_file = task["output_file"]
+    file_path = os.path.join(DOWNLOADS_DIR, output_file)
+    
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            logger.info(f"已删除文件: {file_path}")
+            return JSONResponse(content={"message": "文件已删除"})
+        else:
+            raise HTTPException(status_code=404, detail="文件不存在")
+    except Exception as e:
+        logger.error(f"删除文件失败: {e}")
+        raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
+
+@app.get("/api/tasks/{task_id}/progress")
+async def get_task_progress(task_id: str):
+    """获取任务进度"""
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    task = tasks[task_id]
+    return JSONResponse(content={
+        "task_id": task_id,
+        "status": task["status"],
+        "progress": task.get("progress", 0),
+        "duration": task.get("duration"),
+        "file_size": task.get("file_size", 0)
+    })
 
 @app.on_event("startup")
 def startup_event():
