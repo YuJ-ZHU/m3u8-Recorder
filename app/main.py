@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from typing import Optional, List, Dict, Any
@@ -334,6 +334,21 @@ async def delete_task_file(task_id: str):
     except Exception as e:
         logger.error(f"删除文件失败: {e}")
         raise HTTPException(status_code=500, detail=f"删除文件失败: {str(e)}")
+
+@app.get("/api/tasks/{task_id}/file")
+async def download_task_file(task_id: str):
+    """下载任务对应的视频文件"""
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    task = tasks[task_id]
+    output_file = task["output_file"]
+    file_path = os.path.join(DOWNLOADS_DIR, output_file)
+
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="文件不存在")
+
+    return FileResponse(file_path, filename=output_file, media_type="application/octet-stream")
 
 @app.get("/api/tasks/{task_id}/progress")
 async def get_task_progress(task_id: str):
