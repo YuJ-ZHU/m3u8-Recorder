@@ -322,9 +322,15 @@
             
             const fileActions = task.status === 'completed' ? `
                 <div class="file-actions">
+                    <button type="button" class="btn btn-success btn-sm me-2" id="downloadFileBtn">
+                        <i class="bi bi-download"></i> 下载视频
+                    </button>
                     <button type="button" class="btn btn-warning btn-sm" id="deleteFileBtn">
                         <i class="bi bi-trash"></i> 删除视频文件
                     </button>
+                    <div class="progress mt-2" id="downloadProgress" style="display:none;">
+                        <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                    </div>
                 </div>
             ` : '';
             
@@ -355,6 +361,13 @@
                     if (confirm('确定要删除此视频文件吗？删除后无法恢复！')) {
                         await deleteTaskFile(task.id);
                     }
+                });
+            }
+
+            const downloadFileBtn = taskDetailContent.querySelector('#downloadFileBtn');
+            if (downloadFileBtn) {
+                downloadFileBtn.addEventListener('click', async () => {
+                    await downloadTaskFile(task.id, task.output_file);
                 });
             }
             
@@ -479,6 +492,54 @@
             } catch (error) {
                 console.error('删除文件失败:', error);
                 alert(`删除文件失败: ${error.message}`);
+            }
+        }
+
+        // 下载任务文件并显示进度
+        async function downloadTaskFile(taskId, fileName) {
+            try {
+                const response = await fetch(`/api/tasks/${taskId}/file`);
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || '下载文件失败');
+                }
+
+                const total = parseInt(response.headers.get('Content-Length')) || 0;
+                const reader = response.body.getReader();
+                let received = 0;
+                const chunks = [];
+                const progressContainer = document.getElementById('downloadProgress');
+                const progressBar = progressContainer.querySelector('.progress-bar');
+                progressContainer.style.display = 'block';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    received += value.length;
+                    if (total) {
+                        const progress = (received / total) * 100;
+                        progressBar.style.width = `${progress}%`;
+                        progressBar.textContent = `${progress.toFixed(1)}%`;
+                    }
+                }
+
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+
+                const blob = new Blob(chunks);
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            } catch (error) {
+                console.error('下载文件失败:', error);
+                alert(`下载文件失败: ${error.message}`);
             }
         }
         
