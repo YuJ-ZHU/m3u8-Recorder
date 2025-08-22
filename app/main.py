@@ -45,7 +45,7 @@ class Task(BaseModel):
     id: str
     name: str
     url: str
-    status: str  # pending, running, completed, failed
+    status: str  # pending, scheduled, running, completed, failed, stopped
     created_at: str
     scheduled_time: Optional[str] = None
     end_time: Optional[str] = None
@@ -58,6 +58,9 @@ class Task(BaseModel):
 scheduler = BackgroundScheduler()
 scheduler.start()
 
+# 运行中ffmpeg进程句柄
+task_processes = {}
+
 def load_tasks():
     global tasks
     if os.path.exists(TASKS_FILE):
@@ -66,7 +69,8 @@ def load_tasks():
                 tasks = json.load(f)
                 
             for task_id, task in tasks.items():
-                if task["status"] == "pending" and task["type"] == "scheduled" and task["scheduled_time"]:
+                # 对预约任务进行重新调度（无论是pending还是scheduled）
+                if task.get("type") == "scheduled" and task.get("scheduled_time") and task.get("status") in ["pending", "scheduled"]:
                     schedule_task(task_id, task["scheduled_time"], task.get("end_time"))
         except Exception as e:
             logger.error(f"加载任务失败: {e}")
@@ -106,6 +110,8 @@ def download_m3u8(task_id: str):
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
             universal_newlines=True, bufsize=1
         )
+        # 记录进程以便按时停止
+        task_processes[task_id] = process
         
         # 启动进度监控线程
         progress_thread = threading.Thread(
@@ -116,6 +122,9 @@ def download_m3u8(task_id: str):
         
         stdout, stderr = process.communicate()
         progress_thread.join()
+        # 进程退出后清理
+        if task_id in task_processes:
+            task_processes.pop(task_id, None)
         
         if process.returncode != 0:
             logger.error(f"下载失败: {stderr}")
@@ -202,12 +211,8 @@ def schedule_task(task_id: str, start_time: str, end_time: Optional[str] = None)
         if end_time:
             end_dt = datetime.fromisoformat(end_time)
             end_trigger = DateTrigger(run_date=end_dt)
-            
-            def stop_recording(task_id):
-                pass
-            
             scheduler.add_job(
-                stop_recording, 
+                stop_task, 
                 trigger=end_trigger, 
                 args=[task_id], 
                 id=f"stop_{task_id}",
@@ -218,6 +223,25 @@ def schedule_task(task_id: str, start_time: str, end_time: Optional[str] = None)
     
     except Exception as e:
         logger.error(f"调度任务失败: {e}")
+
+def stop_task(task_id: str):
+    """在预约结束时间终止录制/下载"""
+    try:
+        process = task_processes.get(task_id)
+        if process and process.poll() is None:
+            logger.info(f"按计划停止任务 {task_id}")
+            # 尝试优雅终止
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except Exception:
+                process.kill()
+        # 更新状态（如果仍是运行中则标记为已停止）
+        if task_id in tasks and tasks[task_id].get("status") == "running":
+            tasks[task_id]["status"] = "stopped"
+            save_tasks()
+    except Exception as e:
+        logger.error(f"停止任务 {task_id} 失败: {e}")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
@@ -262,7 +286,8 @@ async def create_task(
             "id": task_id,
             "name": name,
             "url": url,
-            "status": "pending",
+            # 预约任务默认置为 scheduled，立即任务置为 pending 等待启动
+            "status": "scheduled" if task_type == "scheduled" else "pending",
             "created_at": datetime.now().isoformat(),
             "output_file": output_file,
             "type": task_type
@@ -304,6 +329,19 @@ async def delete_task(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
     
     try:
+        # 如果任务在运行，先尝试终止进程
+        proc = task_processes.get(task_id)
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            finally:
+                task_processes.pop(task_id, None)
         scheduler.remove_job(f"start_{task_id}")
         scheduler.remove_job(f"stop_{task_id}")
     except:
@@ -313,6 +351,26 @@ async def delete_task(task_id: str):
     save_tasks()
     
     return JSONResponse(content={"message": "任务已删除"})
+
+@app.post("/api/tasks/{task_id}/stop")
+async def stop_running_task(task_id: str):
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    proc = task_processes.get(task_id)
+    if not proc or proc.poll() is not None:
+        raise HTTPException(status_code=400, detail="任务未在运行")
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except Exception:
+            proc.kill()
+        tasks[task_id]["status"] = "stopped"
+        save_tasks()
+        return JSONResponse(content={"message": "任务已停止"})
+    except Exception as e:
+        logger.error(f"停止任务失败: {e}")
+        raise HTTPException(status_code=500, detail="停止任务失败")
 
 @app.delete("/api/tasks/{task_id}/file")
 async def delete_task_file(task_id: str):

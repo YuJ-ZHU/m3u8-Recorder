@@ -34,6 +34,9 @@
         .task-item.status-pending {
             border-left-color: #ffc107;
         }
+        .task-item.status-scheduled {
+            border-left-color: #20c997;
+        }
         .task-item.status-running {
             border-left-color: #0d6efd;
         }
@@ -43,8 +46,14 @@
         .task-item.status-failed {
             border-left-color: #dc3545;
         }
+        .task-item.status-stopped {
+            border-left-color: #6c757d;
+        }
         .status-badge {
             font-size: 0.8rem;
+        }
+        .type-badge {
+            font-size: 0.75rem;
         }
         .form-label {
             font-weight: 500;
@@ -242,6 +251,9 @@
                     const statusClass = `status-${task.status}`;
                     const statusText = getStatusText(task.status);
                     const statusBadge = getStatusBadge(task.status);
+                    const typeBadge = task.type === 'scheduled' 
+                        ? '<span class="badge bg-info type-badge">预约</span>' 
+                        : '<span class="badge bg-secondary type-badge">立即</span>';
                     
                     const progressBar = task.status === 'running' ? `
                         <div class="progress mt-2">
@@ -264,7 +276,7 @@
                     taskElement.innerHTML = `
                         <div class="d-flex justify-content-between align-items-center">
                             <div class="flex-grow-1">
-                                <h5 class="mb-1">${task.name}</h5>
+                                <h5 class="mb-1 d-flex align-items-center gap-2">${task.name} ${typeBadge}</h5>
                                 <p class="mb-1 text-muted small">
                                     <span class="me-2">${formatDateTime(task.created_at)}</span>
                                     ${task.type === 'scheduled' ? `<span class="me-2">计划: ${formatDateTime(task.scheduled_time)}</span>` : ''}
@@ -606,9 +618,11 @@
         function getStatusText(status) {
             switch (status) {
                 case 'pending': return '等待中';
+                case 'scheduled': return '已预约';
                 case 'running': return '下载中';
                 case 'completed': return '已完成';
                 case 'failed': return '失败';
+                case 'stopped': return '已停止';
                 default: return status;
             }
         }
@@ -619,9 +633,11 @@
             
             switch (status) {
                 case 'pending': badgeClass = 'bg-warning'; break;
+                case 'scheduled': badgeClass = 'bg-info'; break;
                 case 'running': badgeClass = 'bg-primary'; break;
                 case 'completed': badgeClass = 'bg-success'; break;
                 case 'failed': badgeClass = 'bg-danger'; break;
+                case 'stopped': badgeClass = 'bg-secondary'; break;
                 default: badgeClass = 'bg-secondary';
             }
             
